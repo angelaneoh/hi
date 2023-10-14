@@ -1,0 +1,248 @@
+import time
+from RPLCD.i2c import CharLCD
+from time import sleep
+import RPi.GPIO as GPIO
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+from mfrc522 import SimpleMFRC522
+
+# Set GPIO Mode and Disable Warnings
+if GPIO.getmode() != GPIO.BCM:
+    GPIO.setmode(GPIO.BCM)
+GPIO.setwarnings(False)
+
+# Initialize RFID Reader Reset Pin (Change this to the appropriate pin number)
+pin_rst = 22
+GPIO.setup(pin_rst, GPIO.OUT)
+
+# Define the scope and credentials to access Google Sheets API
+scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+credentials = ServiceAccountCredentials.from_json_keyfile_name('/home/angela/fyp coding/quixotic-geode-401107-f793bec2b8a7.json', scope)
+
+
+# Authenticate with Google Sheets API
+client = gspread.authorize(credentials)
+
+# Open the Google Sheet by its title
+spreadsheet = client.open('Store Inventory Management Vending Machine')
+
+# Access the specific sheet by its index (indexing starts from 0)
+specific_sheet = spreadsheet.get_worksheet(5)  # 2 is the index of the third sheet
+
+# Access the specific sheet by its title
+specific_sheet = spreadsheet.worksheet('Customer')
+
+
+GPIO.setmode(GPIO.BCM)  # Set pin numbering mode to BCM
+GPIO.setwarnings(False)
+
+lcd = CharLCD('PCF8574', 0x27)
+lcd.cursor_pos = (0, 0)
+reader = SimpleMFRC522()  # Initialize the RFID reader object
+entered_password = ""  # Initialize an empty string to store user-entered password          
+password_attempts = 0  # Initialize a variable to track the number of password entry attempts
+
+# Set up motor configurations
+motor_pin = 11  # Change this to the actual GPIO pin number you are using for the motor
+GPIO.setup(motor_pin, GPIO.OUT)
+motor_pwm = GPIO.PWM(motor_pin, 50)  # 50 Hz pulse frequency
+
+L1 = 5
+L2 = 6
+L3 = 13
+L4 = 19
+
+C1 = 12
+C2 = 16
+C3 = 20
+C4 = 21
+
+framebuffer = [
+    '',
+    '',
+]
+
+# Define your keypad function here (assuming you already have the implementation)
+def read_keypad():
+    GPIO.setup([L1, L2, L3, L4], GPIO.OUT)
+    GPIO.setup([C1, C2, C3, C4], GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+
+    keys = [
+        ["1", "2", "3", "A"],
+        ["4", "5", "6", "B"],
+        ["7", "8", "9", "C"],
+        ["*", "0", "#", "D"]
+    ]
+
+    for i in range(4):
+        GPIO.output([L1, L2, L3, L4][i], GPIO.HIGH)
+        for j in range(4):
+            if GPIO.input([C1, C2, C3, C4][j]) == GPIO.HIGH:
+                return keys[i][j]
+
+    return None
+
+
+def write_to_lcd(lcd, framebuffer, num_cols):
+    lcd.home()
+    for row in framebuffer:
+        lcd.write_string(row.ljust(num_cols)[:num_cols])
+        lcd.write_string('\r\n')
+
+def long_text(text, num_cols=20):
+    slide_count = 0  # Counter to keep track of the number of slides
+    if len(text) < num_cols:
+        lcd.write_string(text)
+        sleep(1)  # Sleep for a short duration to show the complete text
+    else:
+        for i in range(len(text) - num_cols + 1):
+            slide_count += 1  # Increment the slide counter
+            framebuffer[1] = text[i:i + num_cols]
+            write_to_lcd(lcd, framebuffer, num_cols)
+            sleep(0.2)
+
+            lcd.cursor_pos = (1, 0)
+    
+    return slide_count  # Return the total number of slides
+    
+def check_rfid_tag(rfid_tag):
+    try:
+        # Get all values in column 1 (index 0) of the Google Sheet
+        rfid_tags_column = specific_sheet.col_values(1)
+        passwords_column = specific_sheet.col_values(6)
+        customer_names_column = specific_sheet.col_values(2)
+
+         # Check if the provided RFID tag ID exists in the list of RFID tags from column 1
+        if rfid_tag in rfid_tags_column:
+            index = rfid_tags_column.index(rfid_tag)
+            password = passwords_column[index]  # Get the corresponding password
+            customer_name = customer_names_column[index]  # Get the corresponding customer name
+            return password, customer_name  # Return password and customer name if RFID tag ID is found
+
+    except Exception as e:
+        print("Error checking RFID tag:", str(e))
+
+    return None, None  # Return None if the RFID tag ID is not found or an error occurs
+    
+# Function to rotate the motor
+def rotate_motor():
+    try:
+        # Rotate the motor (you might need to adjust the duty cycle for your motor)
+        motor_pwm.start(7.5)  # Start PWM with 7.5% duty cycle (adjust as needed)
+        time.sleep(2)  # Rotate the motor for 2 seconds (adjust as needed)
+        motor_pwm.stop()  # Stop the motor
+    except KeyboardInterrupt:
+        # Clean up GPIO on keyboard interrupt
+        GPIO.cleanup()
+        
+def cleanup_gpio():
+    GPIO.cleanup()
+
+
+# Initialize a variable to track whether the welcome message is displayed
+# Initialize the welcome_displayed flag
+# Initialize the welcome_displayed flag and timestamp for last button press
+welcome_displayed = True
+last_button_press_time = time.time()
+
+# Loop indefinitely
+while True:
+    # Display the welcome message if it hasn't been displayed yet
+    if welcome_displayed:
+        long_text("Welcome to Angela's Vending Machine")
+        sleep(1.5)  # Sleep for a duration before restarting the text loop
+        
+    # Check if a key is pressed on the keypad
+    pressed_key = read_keypad()
+
+    # If a key is pressed, update the LCD, print the message, and update last_button_press_time
+    if pressed_key is not None:
+        # Clear the LCD by displaying an empty message
+        lcd.clear()
+        # Display the "Please scan your tag" message on the LCD screen
+        long_text("Please scan your tag")
+        sleep(1)
+        print(f"Please scan your tag: {pressed_key}")  # Print to the console with the pressed key value
+        last_button_press_time = time.time()  # Update the timestamp for the last button press
+        welcome_displayed = False  # Set the flag to indicate the welcome message is not displayed
+    
+    # If no button is pressed for 10 seconds, reset LCD and welcome_displayed flag
+    if not welcome_displayed and time.time() - last_button_press_time >= 10:
+        lcd.clear()
+        welcome_displayed = True  # Set the flag to indicate the welcome message can be displayed again
+      
+    
+
+
+    try:
+        # Scanning for RFID tags
+        print("Scanning for RFID tags...")
+        id, text = reader.read()  # Read RFID tag ID and data
+
+        if id is not None:
+            lcd.clear()
+            lcd.write_string("Scanning tag...")
+            time.sleep(1)  # Simulate RFID scanning time
+
+      # Check if the scanned tag is in the Google Sheet and get the corresponding password and customer name
+            password_from_sheet, customer_name = check_rfid_tag(str(id))
+
+            if password_from_sheet:
+                lcd.clear()
+                lcd.write_string(f"Welcome {customer_name}")
+                lcd.cursor_pos = (1, 0)
+                lcd.write_string("Enter password:")
+                entered_password = ""  # Initialize an empty string to store user-entered password
+
+                # Loop to read password from the keypad
+                while len(entered_password) < 4:
+                    key = read_keypad()
+                    if key:
+                        entered_password += key  # Append the pressed key to the entered password
+                        print("Key pressed:", key)  # Print the pressed key to the console for debugging
+                        lcd.clear()
+                        lcd.write_string("Enter password:")
+                        lcd.cursor_pos = (1, 0)
+                        lcd.write_string('*' * len(entered_password))  # Display asterisks for password input
+
+                # Compare the entered password with the password from the Google Sheets
+                if entered_password == password_from_sheet:
+                    lcd.clear()
+                    lcd.write_string("Access Granted")
+                    lcd.cursor_pos = (1, 0)
+                    lcd.write_string(f"RFID Tag ID: {id}")
+                    # Implement further actions for granting access (e.g., dispense product)
+                    
+                   # Ask the user to select an item
+                    lcd.clear()
+                    lcd.write_string("Select Item:")
+                    selected_item = read_keypad()
+
+                    # Rotate motor based on selected item
+                    if selected_item in ['1', '2', '3', '4']:
+                        rotate_motor()
+                    else:
+                        lcd.clear()
+                        lcd.write_string("Invalid Selection")
+                        time.sleep(2)
+                else:
+                    lcd.clear()
+                    lcd.write_string("Access Denied")
+                    time.sleep(2)  # Show error message for 2 seconds
+        
+                
+        # Reset welcome_displayed for the next iteration
+            welcome_displayed = True
+
+        # If no button is pressed for 10 seconds, reset LCD and welcome_displayed flag
+        if not welcome_displayed and time.time() - last_button_press_time >= 10:
+            lcd.clear()
+            welcome_displayed = True  # Set the flag to indicate the welcome message can be displayed again
+
+        # Add a short delay to avoid unnecessary CPU usage
+        time.sleep(0.1)
+
+    except Exception as e:
+        print("Error reading RFID:", str(e))
+        cleanup_gpio()
+        

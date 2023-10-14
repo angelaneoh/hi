@@ -1,0 +1,8 @@
+its reading the table such as example below
+RFID Tag ID|	Customer Name|	Contact number|	email|				balance| 	password|	
+356649575687|	Angela Neoh|	125915058|	angela.neoh19@gmail.com|	50|		11111|
+151069981325|	Andrew Neoh|	125515898|	andrewneohzengen@gmail.com|	50|		22222|
+631637932788|	Tan Jia Qi|	1113020920|	tanisha@mystore.com|		50|		33333|
+82027417139|	Ooi Ying Yen|	1110906377|	tanishk@mystore.com|		50|		44444|
+702493752626|	Loh Ying Ying|	1139330165|	tarun@mystore.com|		50|		55555|
+14965276026|	Chea Wan Yie|	1155582124|	vaibhav@mystore.com|		50|		66666|

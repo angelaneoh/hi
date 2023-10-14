@@ -1,0 +1,70 @@
+import MFRC522
+import RPi.GPIO as GPIO
+from RPLCD.i2c import CharLCD
+from time import sleep
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+
+# Initialize the RFID reader
+MIFAREReader = MFRC522.MFRC522()
+
+# Initialize the LCD
+lcd = CharLCD('PCF8574', 0x27)
+lcd.cursor_pos = (0, 0)
+
+# Initialize Google Sheets API credentials
+scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+credentials = ServiceAccountCredentials.from_json_keyfile_name('/path/to/your/credentials.json', scope)
+client = gspread.authorize(credentials)
+spreadsheet = client.open('Your Spreadsheet Name')
+specific_sheet = spreadsheet.worksheet('Sheet Name')
+
+# Function to read RFID tags
+def read_rfid():
+    # Scan for cards
+    (status, TagType) = MIFAREReader.MFRC522_Request(MIFAREReader.PICC_REQIDL)
+
+    # If a card is found, get the UID of the card
+    if status == MIFAREReader.MI_OK:
+        (status, uid) = MIFAREReader.MFRC522_Anticoll()
+
+        # If the UID is successfully obtained, format it as a string and return
+        if status == MIFAREReader.MI_OK:
+            return ''.join(str(x) for x in uid)
+    # If no card is found, return None
+    return None
+
+# Function to check RFID tag against Google Sheets
+def check_rfid_tag(tag):
+    all_tags = specific_sheet.col_values(1)  # Assuming RFID tags are in the first column of the sheet
+    return tag in all_tags
+
+# Loop indefinitely
+while True:
+    # Read RFID tag
+    scanned_tag = read_rfid()
+
+    # Handle RFID scanning and validation process
+    if scanned_tag is not None:
+        lcd.clear()
+        lcd.write_string("Scanning tag...")
+        sleep(1)  # Simulate RFID scanning time
+
+        # Check if the scanned tag is in the Google Sheet
+        tag_found = check_rfid_tag(scanned_tag)
+
+        # If the tag is found, display the appropriate message on the LCD
+        if tag_found:
+            lcd.clear()
+            lcd.write_string("Welcome, User!")
+            lcd.cursor_pos = (1, 0)
+            lcd.write_string("Access Granted")
+        else:
+            lcd.clear()
+            lcd.write_string("Access Denied")
+            sleep(2)  # Show error message for 2 seconds
+
+    # Rest of your code...
+    # Handle other operations or user input here...
+
+    sleep(0.1)  # Add a short delay to avoid unnecessary CPU usage
